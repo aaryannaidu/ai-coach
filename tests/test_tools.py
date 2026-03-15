@@ -9,6 +9,9 @@ Run:
 """
 
 from unittest.mock import MagicMock
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from live_agent.tools.session_tools import log_qa_pair, get_session_context
 
 

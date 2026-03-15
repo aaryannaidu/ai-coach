@@ -1,4 +1,7 @@
 from google.adk.agents import Agent
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
+from google.genai import types
 from .tools.session_tools import log_qa_pair, get_session_context
 from .prompts.system_prompt import (
     build_interview_instruction,
@@ -6,6 +9,31 @@ from .prompts.system_prompt import (
     GENERAL_INTERVIEW_PROMPT,
     STARTUP_PITCH_PROMPT,
 )
+from .sub_agents.evaluator_agent import evaluator_agent
+
+
+# ---------------------------------------------------------------
+# Session reset callback
+#
+# ADK reuses agent objects across sessions in adk web. Without
+# this, qa_history and user_context from a previous session bleed
+# into the next one. This callback fires at the very start of
+# every new agent invocation and wipes those keys clean.
+# ---------------------------------------------------------------
+
+def _reset_session_state(callback_context: CallbackContext) -> None:
+    """Clear session-scoped state at the start of every new turn.
+    Fires before the LLM is called, so the agent always starts clean.
+    Only resets on turn 1 (invocation_id == 0 in a fresh session).
+    """
+    state = callback_context.state
+    # Reset only if this looks like a brand new session
+    # (qa_history key absent OR session was just created)
+    if "_session_initialised" not in state:
+        state["qa_history"] = []
+        state["mode"] = "Startup Pitch"
+        state["user_context"] = {}
+        state["_session_initialised"] = True
 
 # ---------------------------------------------------------------
 # Model
@@ -16,7 +44,7 @@ MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
 # Text model used in tests — Live API models don't support generateContent
 # (the endpoint InMemoryRunner uses). Swap to this for automated testing.
-TEXT_MODEL = "gemini-3.0-flash"
+TEXT_MODEL = "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------
@@ -66,6 +94,8 @@ def create_interview_agent(
             job_description=job_description,
         ),
         tools=[log_qa_pair, get_session_context],
+        sub_agents=[evaluator_agent],
+        before_agent_callback=_reset_session_state,
     )
 
 
@@ -102,6 +132,8 @@ def create_pitch_agent(
             pitch_deck_text=pitch_deck_text,
         ),
         tools=[log_qa_pair, get_session_context],
+        sub_agents=[evaluator_agent],
+        before_agent_callback=_reset_session_state,
     )
 
 
@@ -120,13 +152,25 @@ def create_pitch_agent(
 
 root_agent = Agent(
     name="interview_ai",
-    model=MODEL,
+    model=TEXT_MODEL,
     description=(
         "InterviewAI — a real-time voice interview coach. "
         "Supports General Interview mode (mock job interviews) and "
         "Startup Pitch mode (investor pitch practice). "
         "Swap root_agent assignment to test each mode locally."
     ),
-    instruction=STARTUP_PITCH_PROMPT,  # Default to interview mode for local dev
+    instruction=STARTUP_PITCH_PROMPT,  # Swap to GENERAL_INTERVIEW_PROMPT to test interview mode
     tools=[log_qa_pair, get_session_context],
+    sub_agents=[evaluator_agent],
+    before_agent_callback=_reset_session_state,
+    generate_content_config=types.GenerateContentConfig(
+        # Force the model to always evaluate whether to call a tool.
+        # Without this, Gemini sometimes skips function calls entirely
+        # when it thinks a plain text response is sufficient.
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode="AUTO",
+            )
+        )
+    ),
 )

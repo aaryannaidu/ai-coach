@@ -237,7 +237,7 @@ This replaces both the old `scoring_agent` and `feedback_agent`. Called once, sc
 #### `prompts/evaluator_prompt.py`
 
 ```python
-EVALUATOR_PROMPT = """
+EVALUATOR_EXAMPLE_PROMPT = """
 You are a precise interview evaluation engine.
 
 You will receive a complete session record containing:
